@@ -59,10 +59,7 @@ class ClimateClassifier:
         ind = np.random.permutation(self.df.shape[0])
         self.sample = self.df[ind[:self.sample_size], :, :]
 
-        logging.info('Grid search of autoencoder models')
-        self.grid_search()
-
-        """ logging.info('Step 1')
+        logging.info('Step 1')
         self.first_autoencoder()
 
         logging.info('Final autoencoder')
@@ -71,6 +68,8 @@ class ClimateClassifier:
         logging.info('We keep only the encoder part')
         self.encoder()
 
+        self.save_encoded_predictions()
+        """
         logging.info('Time series clustering')
         self.ts_clustering()
 
@@ -144,16 +143,27 @@ class ClimateClassifier:
 
         inp = layers.Input(shape=(self.df.shape[1], self.df.shape[2]))
 
-        encoder = layers.TimeDistributed(layers.Dense(50, activation='tanh'))(inp)
-        encoder1 = layers.TimeDistributed(layers.Dense(10, activation='tanh'))(encoder)
-        latent = layers.TimeDistributed(layers.Dense(1, activation='tanh'))(encoder1)
+        encoder = layers.TimeDistributed(layers.Dense(50, activation='tanh'), name = 'time_distributed')(inp)
+        encoder1 = layers.TimeDistributed(layers.Dense(10, activation='tanh'), name = 'time_distributed1')(encoder)
+        latent = layers.TimeDistributed(layers.Dense(1, activation='tanh'), name = 'time_distributed2')(encoder1)
 
         encoder_model = Model(inp, latent)
         encoder_model.get_layer('time_distributed').set_weights(model.get_layer('time_distributed').get_weights())
-        encoder_model.get_layer('time_distributed_1').set_weights(model.get_layer('time_distributed_1').get_weights())
-        encoder_model.get_layer('time_distributed_2').set_weights(model.get_layer('time_distributed_2').get_weights())
+        encoder_model.get_layer('time_distributed1').set_weights(model.get_layer('time_distributed_1').get_weights())
+        encoder_model.get_layer('time_distributed2').set_weights(model.get_layer('time_distributed_2').get_weights())
 
         self.encoder_model = encoder_model
+
+
+    def save_encoded_predictions (self):
+        """
+            Save txt with time-series with reduced dimensionality
+        """
+        logging.info('Reducing dimensionality hole dataset')
+        res = self.encoder_model.predict(self.df)
+        res = res.reshape((self.df.shape[0], self.df.shape[1]))
+        np.savetxt(os.path.join(self.results_path,'reduced_dim_ts.txt'), res)
+        logging.info('Reduced dataset saved')
 
 
     def ts_clustering(self):
