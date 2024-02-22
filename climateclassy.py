@@ -13,14 +13,14 @@ from tensorflow.keras import layers, Model
 import tensorflow as tf
 from tensorflow.keras.callbacks import ModelCheckpoint
 
-from tslearn.clustering import TimeSeriesKMeans
+from tslearn.clustering import TimeSeriesKMeans, silhouette_score
 from tslearn.barycenters import dtw_barycenter_averaging as dtw_avg
 
 from sklearn.model_selection import KFold
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.wrappers.scikit_learn import KerasRegressor
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Input, Dense, Flatten, Reshape
+from tensorflow.keras.optimizers import Adam
 
 
 
@@ -38,13 +38,15 @@ class ClimateClassifier:
         cluster. It can also plot the results.
     """
 
-    def __init__(self, data, results_path, n_clusters = 5, sample_size = 400, path_to_model = None, epochs_step1 = 30000, epochs_final = 100):
+    def __init__(self, data, results_path, n_clusters = 5, sample_size = 400, path_to_model_step1 = None, path_to_model_final = None, dim_red_cluster = True, epochs_step1 = 30000, epochs_final = 100):
         self.df = data.df
         self.var_names = data.var_names
         self.results_path = results_path
         self.n_clusters = n_clusters
         self.sample_size = sample_size
-        self.path_to_model = path_to_model
+        self.path_to_model_step1 = path_to_model_step1
+        self.path_to_model_final = path_to_model_final
+        self.dim_red_cluster = dim_red_cluster
         self.epochs_step1 = epochs_step1
         self.epochs_final = epochs_final
         self.longitud = data.longitud
@@ -59,16 +61,23 @@ class ClimateClassifier:
         ind = np.random.permutation(self.df.shape[0])
         self.sample = self.df[ind[:self.sample_size], :, :]
 
-        logging.info('Step 1')
-        self.first_autoencoder()
+        
+        if self.dim_red_cluster:
+            self.encoder()
+        
+        self.silhouette_score()
+        # logging.info('Step 1')
+        # self.first_autoencoder()
 
-        logging.info('Final autoencoder')
-        self.final_autoencoder() 
+        # logging.info('Final autoencoder')
+        # self.final_autoencoder() 
+        
+        # logging.info('We keep only the encoder part')
+        # self.encoder()
+        # self.silhouette_score()
 
-        logging.info('We keep only the encoder part')
-        self.encoder()
-
-        self.save_encoded_predictions()
+        
+        # self.save_encoded_predictions()
         """
         logging.info('Time series clustering')
         self.ts_clustering()
@@ -94,9 +103,9 @@ class ClimateClassifier:
         training_idx, test_idx = ind[:int(self.sample_size*0.7)], ind[int(self.sample_size*0.7):] # 70% training, 30% validation
         x_train, x_test = self.sample[training_idx,:,:], self.sample[test_idx,:,:]
 
-        if self.path_to_model:
+        if self.path_to_model_step1:
             # in case we already saved a model and just want to retrain it
-            autoencoder = tf.keras.models.load_model(self.path_to_model)
+            autoencoder = tf.keras.models.load_model(self.path_to_model_step1)
 
         else:
             # define our model for the first time, in case we don't have a saved model:
@@ -109,8 +118,9 @@ class ClimateClassifier:
             out = layers.TimeDistributed(layers.Dense(self.df.shape[2]))(decoder)
 
             autoencoder = Model(inputs=inp, outputs=out)
-    
-        autoencoder.compile(optimizer='adam', loss='mse')
+
+        adam_opt = Adam(learning_rate = 0.0001)
+        autoencoder.compile(optimizer=adam_opt, loss='mse')
         logging.info('Training autoencoder with a small sample of {} pixels.'.format(self.sample_size))
         model_checkpoint = ModelCheckpoint(os.path.join(self.results_path, 'best_model_step1.h5'), monitor='val_loss', mode='min', save_best_only=True)
         autoencoder.fit(x_train, x_train, epochs = self.epochs_step1, validation_data= (x_test, x_test), callbacks=[model_checkpoint])
@@ -127,7 +137,8 @@ class ClimateClassifier:
         x_train, x_test = self.df[training_idx,:,:], self.df[test_idx,:,:]
 
         autoencoder = tf.keras.models.load_model(os.path.join(self.results_path, 'best_model_step1.h5'))
-        autoencoder.compile(optimizer='adam', loss='mse')
+        adam_opt = Adam(learning_rate = 0.00001)
+        autoencoder.compile(optimizer=adam_opt, loss='mse')
         logging.info('Training autoencoder with the hole dataset.')
         model_checkpoint = ModelCheckpoint(os.path.join(self.results_path, 'best_model_final.h5'), monitor='val_loss', mode='min', save_best_only=True)
         autoencoder.fit(x_train, x_train, epochs = self.epochs_final, validation_data= (x_test, x_test), callbacks=[model_checkpoint])
@@ -139,7 +150,11 @@ class ClimateClassifier:
         """ 
             We only want the encoder part, to reduce dimensionality
         """
-        model = tf.keras.models.load_model(os.path.join(self.results_path, 'best_model_final.h5'))
+        
+        if self.path_to_model_final:
+            trained_model = tf.keras.models.load_model(self.path_to_model_final)
+        else:
+            trained_model = tf.keras.models.load_model(os.path.join(self.results_path, 'best_model_final.h5'))
 
         inp = layers.Input(shape=(self.df.shape[1], self.df.shape[2]))
 
@@ -148,9 +163,9 @@ class ClimateClassifier:
         latent = layers.TimeDistributed(layers.Dense(1, activation='tanh'), name = 'time_distributed2')(encoder1)
 
         encoder_model = Model(inp, latent)
-        encoder_model.get_layer('time_distributed').set_weights(model.get_layer('time_distributed').get_weights())
-        encoder_model.get_layer('time_distributed1').set_weights(model.get_layer('time_distributed_1').get_weights())
-        encoder_model.get_layer('time_distributed2').set_weights(model.get_layer('time_distributed_2').get_weights())
+        encoder_model.get_layer('time_distributed').set_weights(trained_model.get_layer('time_distributed').get_weights())
+        encoder_model.get_layer('time_distributed1').set_weights(trained_model.get_layer('time_distributed_1').get_weights())
+        encoder_model.get_layer('time_distributed2').set_weights(trained_model.get_layer('time_distributed_2').get_weights())
 
         self.encoder_model = encoder_model
 
@@ -170,6 +185,7 @@ class ClimateClassifier:
         """
             We fit the model on the small dataset and predict on the hole dataset
         """
+
         logging.info('Reducing dimensionality of subset')
         data = self.encoder_model.predict(self.sample)
         data = data.reshape((self.sample_size, self.df.shape[1]))
@@ -177,21 +193,58 @@ class ClimateClassifier:
         data = pd.DataFrame(data)
 
         logging.info('Fitting k-means')
-        model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=100)
-        model.fit(data)
+        clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=100)
+        clustering_model.fit(data)
 
-        res = self.encoder_model.predict(self.df)
-        res = res.reshape((self.df.shape[0], self.df.shape[1]))
+        self.clm = clustering_model
+
+
+    def ts_clustering_predict(self):
+        """
+            Predict and save clustering for the hole dataset
+        """
+
+        if os.path.exists(os.path.join(self.results_path,'reduced_dim_ts.txt')):
+            res = np.loadtxt(os.path.join(self.results_path,'reduced_dim_ts.txt'))
+        else:
+            res = self.encoder_model.predict(self.df)
+            res = res.reshape((self.df.shape[0], self.df.shape[1]))
 
         logging.info('Predicting hole dataset')
         results = pd.DataFrame()
-        results['group'] = model.predict(res)
+        results['group'] = self.clm.predict(res)
         results['coord_x'] = self.longitud
         results['coord_y'] = self.latitud
 
         results.to_csv(os.path.join(self.results_path, 'clustering_results.csv'))
         self.results = results
 
+
+    def silhouette_score(self):
+        """
+            Compute best number of clusters
+        """
+
+        logging.info('Computing Silhouette score')
+        n = [2, 3, 4, 5, 6, 7, 8, 10]
+
+        if self.dim_red_cluster:
+            logging.info('Time series clustering afte reducing dimensionality with autoencoder')
+            data_to_cluster = self.encoder_model.predict(self.sample)
+            data_to_cluster = data_to_cluster.reshape((self.sample_size, self.df.shape[1]))
+            logging.info(data_to_cluster.shape)
+        else:
+            data_to_cluster = self.sample
+
+        for n_clusters in n:
+            clustering_model = TimeSeriesKMeans(n_clusters= n_clusters, metric="dtw", max_iter=100)
+            labels = clustering_model.fit_predict(data_to_cluster)
+
+            s = silhouette_score(data_to_cluster, labels, metric="dtw", random_state= 42) 
+            logging.info('n_clusters:')
+            logging.info(n_clusters)
+            logging.info('Coef:')
+            logging.info(s)
 
 
     def plot_results(self):
@@ -457,6 +510,3 @@ class GridSearcher:
 
             
             
-
-
-        
