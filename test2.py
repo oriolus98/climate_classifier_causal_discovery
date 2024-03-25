@@ -13,13 +13,13 @@ logs_path = 'logs'
 filename = dt.today().strftime('%y%m%d')  + '.log'
 
 if not os.path.isdir(app_name):
-    os.mkdir(app_name)
+    os.makedirs(app_name)
 
 if not os.path.isdir(os.path.join(app_name, date)):
-    os.mkdir(os.path.join(app_name, date))
+    os.makedirs(os.path.join(app_name, date))
 
 if not os.path.isdir(os.path.join(app_name, date, logs_path)):
-    os.mkdir(os.path.join(app_name, date, logs_path))
+    os.makedirs(os.path.join(app_name, date, logs_path))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +32,7 @@ logging.basicConfig(
 )
 
 if not os.path.isdir(os.path.join(app_name, date, 'results')):
-    os.mkdir(os.path.join(app_name, date, 'results'))
+    os.makedirs(os.path.join(app_name, date, 'results'))
 
 results_path = os.path.join(app_name, date, 'results')
 
@@ -42,12 +42,12 @@ variables = ['Lag_RN_ERA_Ix5day_2', 'Lag_SM_GLEAM_ResPlusTrend_Sx5day_2','maxTXx
 path_to_model_step1 = './tfm/first_dataset_tests/240209/results/best_model_step1.h5'
 best_model_path = './tfm/first_dataset_tests/240212/results/best_model_final.h5'
 
-data = DataLoader(df_path, variables, data_format = 'csv')
+data = DataLoader(df_path, variables, data_format = 'csv', substract_seasonality=[True, False,True,False])
 
 # GS = GridSearcher(data, results_path= results_path, n_fold = 5, epochs=50000)
 # best_opt, best_actf = GS.search()
 
 # logging.info('Best optimizer {}'.format(best_opt))
 
-classy = ClimateClassifier(data = data, results_path = results_path, n_clusters = 5, sample_size = 3000, path_to_model_step1 = path_to_model_step1, dim_red_cluster = True, epochs_step1= 50000, epochs_final= 10000)
+classy = ClimateClassifier(data = data, results_path = results_path, n_clusters = 4, sample_size = 3000, dim_red_cluster = False, epochs_step1= 100000, epochs_final= 10000)
 classy.classify()

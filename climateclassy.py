@@ -61,31 +61,30 @@ class ClimateClassifier:
         ind = np.random.permutation(self.df.shape[0])
         self.sample = self.df[ind[:self.sample_size], :, :]
 
-        
+  
         if self.dim_red_cluster:
+            logging.info('Step 1')
+            self.first_autoencoder()
+
+            logging.info('Final autoencoder')
+            self.final_autoencoder() 
+            
+            # logging.info('We keep only the encoder part')
             self.encoder()
-        
-        self.silhouette_score()
-        # logging.info('Step 1')
-        # self.first_autoencoder()
+            # self.silhouette_score()
 
-        # logging.info('Final autoencoder')
-        # self.final_autoencoder() 
+            self.save_encoded_predictions()
         
-        # logging.info('We keep only the encoder part')
-        # self.encoder()
-        # self.silhouette_score()
-
-        
-        # self.save_encoded_predictions()
-        """
         logging.info('Time series clustering')
         self.ts_clustering()
 
+        self.ts_clustering_predict()
+        logging.info('Plotting results')
         self.plot_results()
 
         logging.info('Computing average series for each variable on each climate group')
-        self.average_series()"""
+        self.average_series()
+        logging.info('We got it!')
 
 
 
@@ -186,11 +185,12 @@ class ClimateClassifier:
             We fit the model on the small dataset and predict on the hole dataset
         """
 
-        logging.info('Reducing dimensionality of subset')
-        data = self.encoder_model.predict(self.sample)
-        data = data.reshape((self.sample_size, self.df.shape[1]))
-
-        data = pd.DataFrame(data)
+        if self.dim_red_cluster:
+            logging.info('Reducing dimensionality of subset')
+            data = self.encoder_model.predict(self.sample)
+            data = data.reshape((self.sample_size, self.df.shape[1]))
+        else:
+            data = self.sample
 
         logging.info('Fitting k-means')
         clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=100)
@@ -204,11 +204,13 @@ class ClimateClassifier:
             Predict and save clustering for the hole dataset
         """
 
-        if os.path.exists(os.path.join(self.results_path,'reduced_dim_ts.txt')):
+        if os.path.exists(os.path.join(self.results_path,'reduced_dim_ts.txt')) and self.dim_red_cluster:
             res = np.loadtxt(os.path.join(self.results_path,'reduced_dim_ts.txt'))
-        else:
+        elif self.dim_red_cluster:
             res = self.encoder_model.predict(self.df)
             res = res.reshape((self.df.shape[0], self.df.shape[1]))
+        else:
+            res = self.df
 
         logging.info('Predicting hole dataset')
         results = pd.DataFrame()
@@ -229,7 +231,7 @@ class ClimateClassifier:
         n = [2, 3, 4, 5, 6, 7, 8, 10]
 
         if self.dim_red_cluster:
-            logging.info('Time series clustering afte reducing dimensionality with autoencoder')
+            logging.info('Time series clustering after reducing dimensionality with autoencoder')
             data_to_cluster = self.encoder_model.predict(self.sample)
             data_to_cluster = data_to_cluster.reshape((self.sample_size, self.df.shape[1]))
             logging.info(data_to_cluster.shape)
@@ -260,7 +262,7 @@ class ClimateClassifier:
         fig, ax = plt.subplots(figsize=(12, 6))
         worldmap.plot(color="lightgrey", ax=ax)
 
-        for group, color in zip(results['group'].unique(), ['blue', 'red', 'green', 'orange', 'purple']):
+        for group, color in zip(results['group'].unique(), ['blue', 'red', 'green', 'orange']):
             plt.scatter(x = results.coord_x[results['group'] == group], y = results.coord_y[results['group'] == group], s = 10, color=color, label=f"Group {group}")
 
         # Creating axis limits and title
@@ -272,7 +274,7 @@ class ClimateClassifier:
         plt.ylabel("Latitude")
         plt.legend()
         plt.savefig(os.path.join(self.results_path, 'groups_map.png'))
-        plt.show()
+        # plt.show()
 
 
 
@@ -318,13 +320,19 @@ class DataLoader:
             It contains the name of the climatic variables of the dataset
         data_format : string
             Format of the original dataset to be loaded. For the moment there are only two options 'csv' or 'netCDF4'
+        substract_seasonality : list of booleans
+            It must have same dimension as var_names. It defines whether each variable must be anomalized or not
+
     """
 
-    def __init__(self, df_path, var_names, data_format = 'csv'):
+    def __init__(self, df_path, var_names, data_format = 'csv', substract_seasonality = [False, False, False, False]):
         self.df_path = df_path
         self.var_names = var_names
         self.data_format = data_format
 
+        if len(var_names) != len(substract_seasonality):
+            raise TypeError('Var_names and substract_seasonality must have same dimension. Substract_seasonality must be a list of booleans defining whether each variable must be anomalized or not.')
+        
         # We charge the data depending on the original format. The final format is always the same: 3-d array where dimension 1 is 
         # pixel number, dimension 2 is time, and dimension 3 is climate variables
         logging.info('DataLoader object initialised')
@@ -338,6 +346,17 @@ class DataLoader:
             logging.info('Loading data with netCDF4 format')
             self.load_nc()
             
+
+
+        if np.sum(substract_seasonality):
+            for i, s in enumerate(substract_seasonality):
+                if s:
+                    logging.info('Substracting seasonality for variable {}'.format(i))
+                    for j in range(self.df.shape[0]):
+                        self.df[j,:,i] = self.anomalize(self.df[j,:,i])
+                        
+            logging.info('Dataset loaded and anomalized')
+
 
 
     def load_nc(self):
@@ -436,6 +455,29 @@ class DataLoader:
         self.longitud = np.array(coord_x)
         self.latitud = np.array(coord_y)
         logging.info('{} pixels saved'.format(self.latitud.shape[0]))
+
+
+
+    @staticmethod
+    def anomalize(dataseries, divide_by_std = True, reference_bounds = None, cycle_length=12, return_cycle=False):
+        """
+            Substract seasonality from a single time series. If return_cycle is true, returns only seasonal component. If return_cycle is false returns only anomalies
+        """
+        
+        if reference_bounds is None:
+            reference_bounds = (0, len(dataseries))
+
+        anomaly = np.copy(dataseries)
+        for t in range(cycle_length):
+            if return_cycle:
+                anomaly[t::cycle_length] = dataseries[t+reference_bounds[0]:reference_bounds[1]:cycle_length].mean(axis=0)
+            else:
+                anomaly[t::cycle_length] -= dataseries[t+reference_bounds[0]:reference_bounds[1]:cycle_length].mean(axis=0)
+                if divide_by_std:
+                    epsilon = 1e-10
+                    std = dataseries[t+reference_bounds[0]:reference_bounds[1]:cycle_length].std(axis=0)
+                    anomaly[t::cycle_length] /= (std + epsilon)
+        return anomaly
 
 
 class GridSearcher:
