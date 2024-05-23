@@ -38,7 +38,7 @@ results_path = os.path.join(app_name, date, 'results')
 
 
 #df_path = './tfm/data/test_data/new_data'
-df_path = './tfm/climate_classifier_causal_discovery/data/preprocessed_data'
+df_path = './tfm/climate_classifier_causal_discovery/data/ugent_data'
 # variables = ['Lag_RN_ERA_Ix5day_2', 'Lag_SM_GLEAM_ResPlusTrend_Sx5day_2','maxTXx_cum_T_ERA_2', 'monthly_Rx1day_P_CPCU'] 
 variables = ['MonthlyRes_Mean_RN_ERA_Residuals','MonthlyRes_Mean_SM_GLEAM_Residuals','T_CRU_Residuals','P_CRU_Residuals']
 path_to_model_step1 = './tfm/first_dataset_tests/240209/results/best_model_step1.h5'
