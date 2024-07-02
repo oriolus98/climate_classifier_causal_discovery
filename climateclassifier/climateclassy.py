@@ -193,7 +193,7 @@ class ClimateClassifier:
             data = self.sample
 
         logging.info('Fitting k-means')
-        clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=100)
+        clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=800)
         clustering_model.fit(data)
 
         self.clm = clustering_model
