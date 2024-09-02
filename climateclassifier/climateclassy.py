@@ -63,17 +63,23 @@ class ClimateClassifier:
 
   
         if self.dim_red_cluster:
-            logging.info('Step 1')
-            self.first_autoencoder()
+            if self.path_to_model_final:
+                self.encoder()
+                # self.silhouette_score()
 
-            logging.info('Final autoencoder')
-            self.final_autoencoder() 
-            
-            # logging.info('We keep only the encoder part')
-            self.encoder()
-            # self.silhouette_score()
+                self.save_encoded_predictions()
+            else:
+                logging.info('Step 1')
+                self.first_autoencoder()
 
-            self.save_encoded_predictions()
+                logging.info('Final autoencoder')
+                self.final_autoencoder() 
+                
+                # logging.info('We keep only the encoder part')
+                self.encoder()
+                # self.silhouette_score()
+
+                self.save_encoded_predictions()
         
         logging.info('Time series clustering')
         self.ts_clustering()
@@ -82,8 +88,8 @@ class ClimateClassifier:
         logging.info('Plotting results')
         self.plot_results()
 
-        logging.info('Computing average series for each variable on each climate group')
-        self.average_series()
+        #logging.info('Computing average series for each variable on each climate group')
+        #self.average_series()
         logging.info('We got it!')
 
 
@@ -193,7 +199,7 @@ class ClimateClassifier:
             data = self.sample
 
         logging.info('Fitting k-means')
-        clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=800)
+        clustering_model = TimeSeriesKMeans(n_clusters= self.n_clusters, metric="dtw", max_iter=1000)
         clustering_model.fit(data)
 
         self.clm = clustering_model
@@ -325,13 +331,22 @@ class DataLoader:
 
     """
 
-    def __init__(self, df_path, var_names, data_format = 'csv', substract_seasonality = [False, False, False, False]):
+    def __init__(self, df_path, var_names, data_format = 'csv', substract_seasonality = [False, False, False, False], cycle_length = 12):
         self.df_path = df_path
         self.var_names = var_names
         self.data_format = data_format
+        self.cycle_length = cycle_length
 
-        if len(var_names) != len(substract_seasonality):
-            raise TypeError('Var_names and substract_seasonality must have same dimension. Substract_seasonality must be a list of booleans defining whether each variable must be anomalized or not.')
+        if self.data_format == 'csv':
+            if len(var_names) != len(substract_seasonality):
+                raise TypeError('Var_names and substract_seasonality must have same dimension. Substract_seasonality must be a list of booleans defining whether each variable must be anomalized or not.')
+            else:
+                pass
+        if self.data_format == 'nc':
+            if len(var_names) + 1 != len(substract_seasonality):
+                raise TypeError('Var_names + 1 and substract_seasonality must have same dimension. Substract_seasonality must be a list of booleans defining whether each variable must be anomalized or not.')
+        #else:
+            #raise TypeError('Data format not suported')
         
         # We charge the data depending on the original format. The final format is always the same: 3-d array where dimension 1 is 
         # pixel number, dimension 2 is time, and dimension 3 is climate variables
@@ -353,7 +368,7 @@ class DataLoader:
                 if s:
                     logging.info('Substracting seasonality for variable {}'.format(i))
                     for j in range(self.df.shape[0]):
-                        self.df[j,:,i] = self.anomalize(self.df[j,:,i])
+                        self.df[j,:,i] = self.anomalize(self.df[j,:,i], cycle_length= self.cycle_length)
                         
             logging.info('Dataset loaded and anomalized')
         else:
@@ -371,7 +386,8 @@ class DataLoader:
         f = netCDF4.Dataset(os.path.join(self.df_path, 'radiation', '2011_radiation.nc'))
         a = f.variables['Rg']
 
-        df = np.empty((a.shape[1]*a.shape[2], a.shape[0], len(self.var_names) + 1))
+        #df = np.empty((a.shape[1]*a.shape[2], a.shape[0]*11, len(self.var_names) + 1))
+        df = np.empty((100000, a.shape[0]*11, len(self.var_names) + 1))
 
         pixels = []
         k = 0
@@ -381,32 +397,51 @@ class DataLoader:
 
         for i in range(a.shape[1]):
             for j in range(a.shape[2]):
-                df[k,:,dim] = np.array(a[:, i, j])
+                m = 0
+                n = 46
+                logging.info(k)
+                for y in range(2001,2012):
+                    f = netCDF4.Dataset(self.df_path + '/radiation/' + str(y) + '_radiation.nc')
+                    a = f.variables['Rg']
+                    df[k, m:n, dim] = np.array(a[:,i, j])
+                    m += 46
+                    n += 46
                 pixels.append([lat[i], lon[j]])
                 k += 1
+                if k >= 100000:
+                    break
+
+            if k >= 100000:
+                break
 
         self.pixels = pixels 
-
         l = 0
 
         # now we load all the other variables
         for var in self.var_names:
-            f = netCDF4.Dataset(os.path.join(self.df_path, var, '2011_' + var + '.nc'))
-            a = f.variables[var]
-            k = 0
             logging.info('Charging {} data'.format(var))
+            k = 0
 
             for i in range(a.shape[1]):
                 for j in range(a.shape[2]):
-                    df[k,:,l] = np.array(a[:, i, j])
-                    k += 1  
-
+                    m = 0
+                    n = 46
+                    for y in range(2001,2012):
+                        f = netCDF4.Dataset(self.df_path + '/' + var + '/' + str(y) + '_' + var + '.nc')
+                        a = f.variables[var]
+                        df[k, m:n, l] = np.array(a[:, i, j])
+                        m += 46
+                        n += 46
+                    k += 1
+                    if k >= 100000:
+                        break
+                if k >= 100000:
+                    break  
             l += 1
 
         self.var_names.append('radiation')
         self.df = df
         self.separate_pixels_nc()
-
 
 
     def load_csv(self):
