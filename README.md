@@ -1,7 +1,7 @@
 # Climate zones classifier and Causal Discovery with Tigramite
 (In progress)
 
-Section 3 of my master thesis.
+Section 3 of my master thesis (./Master_Thesis_Oriol_Chacon.pdf)
 
 Starting off a climatic dataset, containing different temporal series variables (soil moisture, radiation, temperature...) defined on different Earth locations, the functions and classes defined on this repository can be used to both implement temporal series clustering in order to define geographical climatic zones, and to perform a complet causal analysis of the dataset.
 
